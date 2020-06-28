@@ -12,7 +12,7 @@ class DeepNeuralNetwork:
         
         for i in range(1, L):
             params[f"W{i}"] = np.random.randn(layer_neurons[i], layer_neurons[i-1]) / np.sqrt(layer_neurons[i-1])
-            params[f"b{i}"] = np.zeros((layer_neurons[i], 1), dtype=int) 
+            params[f"b{i}"] = np.zeros((layer_neurons[i], 1)) 
 
         self.params = params
 
@@ -24,7 +24,7 @@ class DeepNeuralNetwork:
     
     def _calculate_cost(self, Y, Yhat):
         m = Y.shape[1]
-        cost = (-1./m) * np.sum((Y @ np.log(Yhat).T) + ((1 - Y) @ np.log(1 - Yhat).T))
+        cost = (-1./m) * np.sum(np.dot(Y, np.log(Yhat).T) + np.dot((1 - Y), np.log(1 - Yhat).T))
         cost = np.squeeze(cost)
         return cost
         
@@ -33,9 +33,9 @@ class DeepNeuralNetwork:
         return dA * s * (1 - s)  
 
     def _relu_derivative(self, X, dA):
-        dZ = np.array(dA, copy=True) 
-        dZ[X <= 0] = 0
-        return dZ
+        P = np.array(dA, copy=True) 
+        P[X <= 0] = 0
+        return P
     
     def _activation_derivative(self, Z, dA, activation):
         if activation == "sigmoid":
@@ -53,7 +53,7 @@ class DeepNeuralNetwork:
         return - (np.divide(Y, Yhat) - np.divide(1 - Y, 1 - Yhat))
 
     def _forward_propagate(self, A, W, b, activation = "sigmoid"):
-        Z_next = W @ A + b
+        Z_next = W.dot(A) + b
         A_next = self._activation(Z_next, activation)
                 
         return Z_next, A_next
@@ -66,10 +66,11 @@ class DeepNeuralNetwork:
         self.intermediate_res["A0"] = X
         
         for i in range(1, L):
+            A_prev = A
             if i == (L - 1):
-                Z, A = self._forward_propagate(A, self.params[f"W{i}"], self.params[f"b{i}"])
+                Z, A = self._forward_propagate(A_prev, self.params[f"W{i}"], self.params[f"b{i}"])
             else:
-                Z, A = self._forward_propagate(A, self.params[f"W{i}"], self.params[f"b{i}"], activation)
+                Z, A = self._forward_propagate(A_prev, self.params[f"W{i}"], self.params[f"b{i}"], activation)
             
             self.intermediate_res[f"Z{i}"] = Z
             self.intermediate_res[f"A{i}"] = A
@@ -80,9 +81,9 @@ class DeepNeuralNetwork:
         m = A_prev.shape[1]
         
         dZ = self._activation_derivative(Z, dA, activation) 
-        dW = ((1/m) * dZ) @ A_prev.T
+        dW = (1/m) * np.dot(dZ, A_prev.T)
         db = (1/m) * np.sum(dZ , axis=1, keepdims=True)
-        dA_prev = W.T @ dZ
+        dA_prev = np.dot(W.T,dZ)
         
         return dA_prev, dW, db
 
@@ -93,7 +94,7 @@ class DeepNeuralNetwork:
 
         for i in range(L - 1, 0, -1):
             if i == (L - 1):
-                dA, dW, db = self._backward_propagate(dA, self.intermediate_res[f"Z{i}"], self.params[f"W{i}"], self.intermediate_res[f"A{i - 1}"], activation=activation)
+                dA, dW, db = self._backward_propagate(dA, self.intermediate_res[f"Z{i}"], self.params[f"W{i}"], self.intermediate_res[f"A{i - 1}"])
             else:
                 dA, dW, db = self._backward_propagate(dA, self.intermediate_res[f"Z{i}"], self.params[f"W{i}"], self.intermediate_res[f"A{i - 1}"], activation=activation)
                     
@@ -109,26 +110,41 @@ class DeepNeuralNetwork:
             self.params[f"b{i}"] = self.params[f"b{i}"] - (learning_rate * self.params[f"db{i}"])
 
     def fit(self, X, Y, learning_rate = 0.1, num_iterations = 1000, layer_hidden_neurons = [100, 50], activation = "sigmoid", print_cost = True):
-        
+        costs = []  
         layer_neurons = [X.shape[0]] + layer_hidden_neurons + [Y.shape[0]]
         self.layer_neurons = layer_neurons
         self._initialize_parameters(layer_neurons)
         
         for i in range(num_iterations + 1):
             A = self._forward_propagate_all(X, layer_neurons, activation=activation)
-            
-            if i % (num_iterations / 10) == 0 and print_cost:
-                print(f"Costo en la iteración {i}: {self._calculate_cost(Y, A)}")
+            cost = self._calculate_cost(Y, A)
+            if print_cost and i % 100 == 0:
+                print(f"Costo en la iteración {i}: {cost}")
                 
             self._backward_propagate_all(Y, A, layer_neurons, activation=activation)
             
             self._update_parameters(learning_rate, layer_neurons)
 
-    def predict(self, X, y):
+            if print_cost and i % 100 == 0:
+                costs.append(cost)
+       
+        # plot the cost
+        if print_cost:
+            plt.rcParams['figure.figsize'] = (5.0, 4.0) # set default size of plots
+            plt.rcParams['image.interpolation'] = 'nearest'
+            plt.rcParams['image.cmap'] = 'gray'
+            
+            plt.plot(np.squeeze(costs))
+            plt.ylabel('cost')
+            plt.xlabel('iterations (per hundreds)')
+            plt.title("Learning rate =" + str(learning_rate))
+            plt.show()
+
+    def predict(self, X, y, activation = "sigmoid"):
         m = X.shape[1]
         p = np.zeros((1,m))
         
-        A = self._forward_propagate_all(X, self.layer_neurons)
+        A = self._forward_propagate_all(X, self.layer_neurons, activation)
 
         for i in range(0, A.shape[1]):
             if A[0,i] > 0.5:
@@ -175,3 +191,17 @@ def load_data():
     test_set_y_orig = test_set_y_orig.reshape((1, test_set_y_orig.shape[0]))
     
     return train_set_x_orig, train_set_y_orig, test_set_x_orig, test_set_y_orig, classes
+
+def load_data_pillo():
+    train_dataset = h5py.File('datasets/cats_dogs_128.hdf5', "r")
+    train_set_x_orig = np.array(train_dataset["train_img"][:]) # your train set features
+    train_set_y_orig = np.array(train_dataset["train_labels"][:]) # your train set labels
+
+    test_set_x_orig = np.array(train_dataset["test_img"][:]) # your test set features
+    test_set_y_orig = np.array(train_dataset["test_labels"][:]) # your test set labels
+
+    
+    train_set_y_orig = train_set_y_orig.reshape((1, train_set_y_orig.shape[0]))
+    test_set_y_orig = test_set_y_orig.reshape((1, test_set_y_orig.shape[0]))
+    
+    return train_set_x_orig, train_set_y_orig, test_set_x_orig, test_set_y_orig
